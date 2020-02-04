@@ -4,19 +4,35 @@ from datetime import timedelta
 from math import pow
 from pandas import Series
 from scipy.sparse import csr_matrix
+from support_funcs import delta_pow, enumerate_hours
 
 
-def delta_pow(time_to_start, time_to_end, power):
-    return pow(time_to_end, power) - pow(time_to_start, power)
+def define_polynom_bounds(contracts, time_func):
+    curveStartPeriod = contracts[0]['Start']
+    numGaps = 0
+    timeToPolynomialBoundaries = []
 
+    #TODO: optionally do/don't allow gaps in contracts
+    for i in range(len(contracts) - 1):
+        contractEnd = contracts[i]['End']
+        nextContractStart = contracts[i + 1]['Start']
 
-def enumerate_hours(start_date, end_date):
-    for n in range(int((end_date - start_date)/timedelta(hours=1) + 1)):
-        yield start_date + timedelta(hours=n)
+        if contractEnd >= nextContractStart:
+            raise Exception('Contracts are overlapping')
+        timeToPolynomialBoundaries.append(
+            time_func(curveStartPeriod, nextContractStart))
+
+        offset = ((contractEnd - nextContractStart) / timedelta(hours=1))
+        if offset < -1:
+            numGaps += 1
+            timeToPolynomialBoundaries.append(
+                time_func(curveStartPeriod, contractEnd + timedelta(hours=-1-offset)))
+
+    return numGaps, timeToPolynomialBoundaries, curveStartPeriod
 
 
 def create_2h_bottom_right_submatrix(contract, curve_start, time_func):
-    "TODO: contract is a Contract object, time_func is a func of {T,T, double}"
+    
     timeToStart = time_func(curve_start, contract['Start'])
     timeToEnd = time_func(curve_start, contract['End']+timedelta(hours=1))
 
@@ -41,29 +57,34 @@ def create_2h_bottom_right_submatrix(contract, curve_start, time_func):
     return subMatrix
 
 
+def solve_linear_system(twoHMatrix, constraintMatrix, vector):
+    #Create system of equations to solve
+    tempMatrix1 = np.concatenate(
+        (twoHMatrix, constraintMatrix.transpose()), axis=1)
+    tempMatrix2 = np.concatenate((constraintMatrix, csr_matrix((
+        constraintMatrix.shape[0], constraintMatrix.shape[0]), dtype=float).todense()), axis=1)
+
+    #matrix = np.stack((tempMatrix1, tempMatrix2))
+    matrix = np.concatenate((tempMatrix1, tempMatrix2))
+
+    #TODO: must solve a system of linear equations, Ax = b, with A QR factorized.
+    q, r = np.linalg.qr(matrix)
+    solution = np.linalg.solve(np.dot(q, r), vector)
+    #solution != to C# solution
+
+    if not np.allclose(np.dot(matrix, solution), vector):
+        raise Exception('System solution is inconsistent with original inputs.') #must be =True
+    return solution
+
+
 def build(contracts, weighting, mult_adjust_func, add_adjust_func, 
           time_func, front_first_derivative=None, back_first_derivative=None):
-    #TODO: contracts = list(contract objects), weighting = Func<T, dbl>
+    
     if len(contracts) < 2:
         raise ValueError("contracts must have at least two elements", nameof(contracts))
 
-    curveStartPeriod = contracts[0]['Start']
-    numGaps = 0
-    timeToPolynomialBoundaries = []
-
-    #TODO: optionally do/don't allow gaps in contracts
-    for i in range(len(contracts) - 1):
-        contractEnd = contracts[i]['End']
-        nextContractStart = contracts[i + 1]['Start']
-
-        if contractEnd >= nextContractStart:
-            raise Exception('Contracts are overlapping')
-        timeToPolynomialBoundaries.append(time_func(curveStartPeriod, nextContractStart))
-
-        if ((contractEnd - nextContractStart) / timedelta(hours=1)) < -1:
-            numGaps += 1
-            timeToPolynomialBoundaries.append(
-                time_func(curveStartPeriod, contractEnd.next()))
+    numGaps, timeToPolynomialBoundaries, curveStartPeriod = define_polynom_bounds(
+        contracts, time_func)
     
     numPolynomials = len(contracts) + numGaps
     numCoefficientsToSolve = numPolynomials * 5
@@ -211,26 +232,13 @@ def build(contracts, weighting, mult_adjust_func, add_adjust_func,
         constraintMatrix[rowNum, numCoefficientsToSolve - 1] = 4 * Math.Pow(timeToEnd, 3)
         vector[numPolynomials * 5 + rowNum] = back_first_derivative
 
-    #Create system of equations to solve
-    tempMatrix1 = np.concatenate(
-        (twoHMatrix, constraintMatrix.transpose()), axis=1)
-    tempMatrix2 = np.concatenate((constraintMatrix, csr_matrix((
-        constraintMatrix.shape[0], constraintMatrix.shape[0]), dtype=float).todense()), axis=1)
-
-    #matrix = np.stack((tempMatrix1, tempMatrix2))
-    matrix = np.concatenate((tempMatrix1, tempMatrix2))
-
-    #TODO: must solve a system of linear equations, Ax = b, with A QR factorized.
-    q, r = np.linalg.qr(matrix)
-    solution = np.linalg.solve(np.dot(q, r), vector)
-    #solution != to C# solution
-    #np.allclose(np.dot(matrix, solution), vector) #must be =True
+    solution = solve_linear_system(twoHMatrix, constraintMatrix, vector)
     
     #Read off results from polynomial
     curveEndPeriod = contracts[len(contracts) - 1]['End']
-    numOutputPeriods = ((curveEndPeriod - curveStartPeriod) / timedelta(hours=1)) + 1
-    outputCurvePeriods = []#*numOutputPeriods
-    outputCurvePrices = []#*numOutputPeriods
+    numOutputPeriods = int(((curveEndPeriod - curveStartPeriod) / timedelta(hours=1)) + 1)
+    outputCurvePeriods = [None]*numOutputPeriods
+    outputCurvePrices = [None]*numOutputPeriods
     outputContractIndex = 0
 
     gapFilled = False
@@ -269,5 +277,9 @@ def build(contracts, weighting, mult_adjust_func, add_adjust_func,
             outputCurvePeriods[outputContractIndex] = timePeriod
             outputContractIndex += 1
 
-    return pd.Series(index=outputCurvePeriods, values=outputCurvePrices)
+    return Series(index=outputCurvePeriods, data=outputCurvePrices)
+
+
+
+
 
