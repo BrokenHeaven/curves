@@ -2,6 +2,7 @@ import scipy as sp
 import numpy as np
 from datetime import timedelta
 from math import pow
+from pandas import Series
 from scipy.sparse import csr_matrix
 
 
@@ -176,8 +177,8 @@ def build(contracts, weighting, mult_adjust_func, add_adjust_func,
             subMatrix = create_2h_bottom_right_submatrix(
                 contract, curveStartPeriod, time_func)
             startIndex = i*5+2
-            endIndexRow = subMatrix.shape[0]
-            endIndexCol = subMatrix.shape[1]
+            endIndexRow = startIndex + subMatrix.shape[0]
+            endIndexCol = startIndex + subMatrix.shape[1]
             twoHMatrix[startIndex:endIndexRow,
                        startIndex:endIndexCol] = subMatrix
             
@@ -189,5 +190,84 @@ def build(contracts, weighting, mult_adjust_func, add_adjust_func,
             rowNum += 3
             gapFilled = True
 
-    return ""
+    #TODO unit test first derivative constraints. How?
+    rowNum -= 3
+    if front_first_derivative is not None:
+        #Coefficient of b
+        constraintMatrix[rowNum, 1] = 1
+        vector[numPolynomials * 5 + rowNum] = front_first_derivative
+        rowNum += 1
+    
+    if back_first_derivative is not None:
+        lastPeriod = contracts[len(contracts) - 1]['End']
+        timeToEnd = time_func(curveStartPeriod, lastPeriod+timedelta(hours=1))
+        #Coefficient of b
+        constraintMatrix[rowNum, numCoefficientsToSolve - 4] = 1
+        #Coefficient of c
+        constraintMatrix[rowNum, numCoefficientsToSolve - 3] = 2 * timeToEnd
+        #Coefficient of d
+        constraintMatrix[rowNum, numCoefficientsToSolve - 2] = 3 * Math.Pow(timeToEnd, 2)
+        #Coefficient of e
+        constraintMatrix[rowNum, numCoefficientsToSolve - 1] = 4 * Math.Pow(timeToEnd, 3)
+        vector[numPolynomials * 5 + rowNum] = back_first_derivative
+
+    #Create system of equations to solve
+    tempMatrix1 = np.concatenate(
+        (twoHMatrix, constraintMatrix.transpose()), axis=1)
+    tempMatrix2 = np.concatenate((constraintMatrix, csr_matrix((
+        constraintMatrix.shape[0], constraintMatrix.shape[0]), dtype=float).todense()), axis=1)
+
+    #matrix = np.stack((tempMatrix1, tempMatrix2))
+    matrix = np.concatenate((tempMatrix1, tempMatrix2))
+
+    #TODO: must solve a system of linear equations, Ax = b, with A QR factorized.
+    q, r = np.linalg.qr(matrix)
+    solution = np.linalg.solve(np.dot(q, r), vector)
+    #solution != to C# solution
+    #np.allclose(np.dot(matrix, solution), vector) #must be =True
+    
+    #Read off results from polynomial
+    curveEndPeriod = contracts[len(contracts) - 1]['End']
+    numOutputPeriods = ((curveEndPeriod - curveStartPeriod) / timedelta(hours=1)) + 1
+    outputCurvePeriods = []#*numOutputPeriods
+    outputCurvePrices = []#*numOutputPeriods
+    outputContractIndex = 0
+
+    gapFilled = False
+    inputContractIndex = 0
+
+    for i in range(numPolynomials):
+        
+        def evaluate_spline(time_period):
+            
+            timeToPeriod = time_func(curveStartPeriod, timePeriod)
+            solutionOffset = i * 5
+            splineValue = float(solution[solutionOffset] + 
+                                solution[solutionOffset + 1] * timeToPeriod + 
+                                solution[solutionOffset + 2] * pow(timeToPeriod, 2) + 
+                                solution[solutionOffset + 3] * pow(timeToPeriod, 3) + 
+                                solution[solutionOffset + 4] * pow(timeToPeriod, 4))
+
+            multAdjust = mult_adjust_func(timePeriod)
+            addAdjust = add_adjust_func(timePeriod)
+
+            return (splineValue + addAdjust) * multAdjust
+
+        if i == 0 or ((contracts[inputContractIndex - 1]['End'] - contracts[inputContractIndex]['Start']) / timedelta(hours=1) == -1) or gapFilled:
+            contract = contracts[inputContractIndex]
+            start = contract['Start']
+            end = contract['End']
+            inputContractIndex += 1
+            gapFilled = False
+        else:
+            start = contracts[inputContractIndex - 1]['End'] + timedelta(hours=1)
+            end = contracts[inputContractIndex]['Start'] - timedelta(hours=1)
+            gapFilled = True
+
+        for timePeriod in enumerate_hours(start, end):
+            outputCurvePrices[outputContractIndex] = evaluate_spline(timePeriod)
+            outputCurvePeriods[outputContractIndex] = timePeriod
+            outputContractIndex += 1
+
+    return pd.Series(index=outputCurvePeriods, values=outputCurvePrices)
 
