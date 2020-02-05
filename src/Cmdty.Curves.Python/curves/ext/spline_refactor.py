@@ -4,37 +4,38 @@ from datetime import timedelta
 from math import pow
 from pandas import Series
 from scipy.sparse import csr_matrix
-from support_funcs import delta_pow, enumerate_hours
+from support_funcs import delta_pow, offset, enumerate_periods
 
 
 def define_polynom_bounds(contracts, time_func):
-    curveStartPeriod = contracts[0]['Start']
+    curveStartPeriod = contracts[0].Start
     numGaps = 0
+    delta = contracts[0].Offset
     timeToPolynomialBoundaries = []
 
     #TODO: optionally do/don't allow gaps in contracts
     for i in range(len(contracts) - 1):
-        contractEnd = contracts[i]['End']
-        nextContractStart = contracts[i + 1]['Start']
+        contractEnd = contracts[i].End
+        nextContractStart = contracts[i + 1].Start
 
         if contractEnd >= nextContractStart:
             raise Exception('Contracts are overlapping')
         timeToPolynomialBoundaries.append(
-            time_func(curveStartPeriod, nextContractStart))
+            time_func(curveStartPeriod, nextContractStart, delta))
 
-        offset = ((contractEnd - nextContractStart) / timedelta(hours=1))
-        if offset < -1:
+        gap = ((contractEnd - nextContractStart) / offset(delta, 1))
+        if gap < -1:
             numGaps += 1
             timeToPolynomialBoundaries.append(
-                time_func(curveStartPeriod, contractEnd + timedelta(hours=-1-offset)))
+                time_func(curveStartPeriod, contractEnd + offset(delta, 1), delta))
 
     return numGaps, timeToPolynomialBoundaries, curveStartPeriod
 
 
 def create_2h_bottom_right_submatrix(contract, curve_start, time_func):
     
-    timeToStart = time_func(curve_start, contract['Start'])
-    timeToEnd = time_func(curve_start, contract['End']+timedelta(hours=1))
+    timeToStart = time_func(curve_start, contract.Start, contract.Offset)
+    timeToEnd = time_func(curve_start, contract.End + offset(contract.Offset, 1), contract.Offset)
 
     subMatrix = csr_matrix((3,3), dtype=float).todense()
 
@@ -105,6 +106,7 @@ def build(contracts, weighting, mult_adjust_func, add_adjust_func,
     inputContractIndex = 0
     gapFilled = False
 
+    delta = contracts[0].Offset
     rowNum = 0
     for i in range(numPolynomials):
         colOffset = i * 5
@@ -155,7 +157,7 @@ def build(contracts, weighting, mult_adjust_func, add_adjust_func,
             constraintMatrix[rowNum + 2, colOffset + 9] = -12.0 * timeToPolynomialBoundaryPow2
 
         #Contract price constraint
-        if i==0 or ((contracts[inputContractIndex - 1]['End'] - contracts[inputContractIndex]['Start']) / timedelta(hours=1) == -1) or gapFilled:
+        if i==0 or ((contracts[inputContractIndex - 1].End - contracts[inputContractIndex].Start) / offset(delta, 1) == -1) or gapFilled:
             contract = contracts[inputContractIndex]
             sumWeight = 0.0
             sumWeightMult = 0.0
@@ -165,10 +167,11 @@ def build(contracts, weighting, mult_adjust_func, add_adjust_func,
             sumWeightMultTimePow4 = 0.0
             sumWeightMultAdd = 0.0
 
-            iterated = list(enumerate_hours(contract['Start'], contract['End']))
+            iterated = list(enumerate_periods(
+                contract.Start, contract.End, delta))
             for timePeriod in iterated:
-                timeToPeriod = time_func(curveStartPeriod, timePeriod)
-                weight = weighting(timePeriod)
+                timeToPeriod = time_func(curveStartPeriod, timePeriod, delta)
+                weight = weighting(timePeriod, delta)
                 multAdjust = mult_adjust_func(timePeriod)
                 addAdjust = add_adjust_func(timePeriod)
 
@@ -193,7 +196,7 @@ def build(contracts, weighting, mult_adjust_func, add_adjust_func,
             #Coefficient of e
             constraintMatrix[priceConstraintRow, colOffset + 4] = sumWeightMultTimePow4
             
-            vector[numPolynomials * 5 + priceConstraintRow] = sumWeight * contract['Price'] - sumWeightMultAdd
+            vector[numPolynomials * 5 + priceConstraintRow] = sumWeight * contract.Price - sumWeightMultAdd
             
             subMatrix = create_2h_bottom_right_submatrix(
                 contract, curveStartPeriod, time_func)
@@ -220,8 +223,9 @@ def build(contracts, weighting, mult_adjust_func, add_adjust_func,
         rowNum += 1
     
     if back_first_derivative is not None:
-        lastPeriod = contracts[len(contracts) - 1]['End']
-        timeToEnd = time_func(curveStartPeriod, lastPeriod+timedelta(hours=1))
+        lastPeriod = contracts[len(contracts) - 1].End
+        timeToEnd = time_func(
+            curveStartPeriod, lastPeriod + offset(delta, 1), delta)
         #Coefficient of b
         constraintMatrix[rowNum, numCoefficientsToSolve - 4] = 1
         #Coefficient of c
@@ -235,8 +239,9 @@ def build(contracts, weighting, mult_adjust_func, add_adjust_func,
     solution = solve_linear_system(twoHMatrix, constraintMatrix, vector)
     
     #Read off results from polynomial
-    curveEndPeriod = contracts[len(contracts) - 1]['End']
-    numOutputPeriods = int(((curveEndPeriod - curveStartPeriod) / timedelta(hours=1)) + 1)
+    curveEndPeriod = contracts[len(contracts) - 1].End
+    numOutputPeriods = int(
+        ((curveEndPeriod - curveStartPeriod) / offset(delta, 1)) + 1)
     outputCurvePeriods = [None]*numOutputPeriods
     outputCurvePrices = [None]*numOutputPeriods
     outputContractIndex = 0
@@ -248,7 +253,7 @@ def build(contracts, weighting, mult_adjust_func, add_adjust_func,
         
         def evaluate_spline(time_period):
             
-            timeToPeriod = time_func(curveStartPeriod, timePeriod)
+            timeToPeriod = time_func(curveStartPeriod, timePeriod, delta)
             solutionOffset = i * 5
             splineValue = float(solution[solutionOffset] + 
                                 solution[solutionOffset + 1] * timeToPeriod + 
@@ -261,18 +266,18 @@ def build(contracts, weighting, mult_adjust_func, add_adjust_func,
 
             return (splineValue + addAdjust) * multAdjust
 
-        if i == 0 or ((contracts[inputContractIndex - 1]['End'] - contracts[inputContractIndex]['Start']) / timedelta(hours=1) == -1) or gapFilled:
+        if i == 0 or ((contracts[inputContractIndex - 1].End - contracts[inputContractIndex].Start) / offset(delta, 1) == -1) or gapFilled:
             contract = contracts[inputContractIndex]
-            start = contract['Start']
-            end = contract['End']
+            start = contract.Start
+            end = contract.End
             inputContractIndex += 1
             gapFilled = False
         else:
-            start = contracts[inputContractIndex - 1]['End'] + timedelta(hours=1)
-            end = contracts[inputContractIndex]['Start'] - timedelta(hours=1)
+            start = contracts[inputContractIndex - 1].End + offset(delta, 1)
+            end = contracts[inputContractIndex].Start - offset(delta, 1)
             gapFilled = True
 
-        for timePeriod in enumerate_hours(start, end):
+        for timePeriod in enumerate_periods(start, end, delta):
             outputCurvePrices[outputContractIndex] = evaluate_spline(timePeriod)
             outputCurvePeriods[outputContractIndex] = timePeriod
             outputContractIndex += 1
