@@ -37,23 +37,23 @@ def create_2h_bottom_right_submatrix(contract, curve_start, time_func):
     timeToStart = time_func(curve_start, contract.Start, contract.Offset)
     timeToEnd = time_func(curve_start, contract.End + offset(contract.Offset, 1), contract.Offset)
 
-    subMatrix = csr_matrix((3,3), dtype=float).todense()
+    subMatrix = csr_matrix((2,2), dtype=float).todense()
 
     deltaPow2 = delta_pow(timeToStart, timeToEnd, 2.0)
     deltaPow3 = delta_pow(timeToStart, timeToEnd, 3.0)
-    deltaPow4 = delta_pow(timeToStart, timeToEnd, 4.0)
+    #deltaPow4 = delta_pow(timeToStart, timeToEnd, 4.0)
 
     subMatrix[0, 0] = 8.0 * (timeToEnd - timeToStart)
     subMatrix[0, 1] = 12.0 * deltaPow2
-    subMatrix[0, 2] = 16.0 * deltaPow3
+    #subMatrix[0, 2] = 16.0 * deltaPow3
 
     subMatrix[1, 0] = 12.0 * deltaPow2
     subMatrix[1, 1] = 24.0 * deltaPow3
-    subMatrix[1, 2] = 36.0 * deltaPow4
+    #subMatrix[1, 2] = 36.0 * deltaPow4
 
-    subMatrix[2, 0] = 16.0 * deltaPow3
-    subMatrix[2, 1] = 36.0 * deltaPow4
-    subMatrix[2, 2] = 57.6 * delta_pow(timeToStart, timeToEnd, 5.0)
+    #subMatrix[2, 0] = 16.0 * deltaPow3
+    #subMatrix[2, 1] = 36.0 * deltaPow4
+    #subMatrix[2, 2] = 57.6 * delta_pow(timeToStart, timeToEnd, 5.0)
 
     return subMatrix
 
@@ -88,7 +88,7 @@ def build(contracts, weighting, mult_adjust_func, add_adjust_func,
         contracts, time_func)
     
     numPolynomials = len(contracts) + numGaps
-    numCoefficientsToSolve = numPolynomials * 5 #5=coeffs of quartic poly
+    numCoefficientsToSolve = numPolynomials * 4 #4=coeffs of cubic
 
     numConstraints = (numPolynomials - 1) * 3 + numPolynomials - numGaps + (
         0 if front_first_derivative is None else 1) + (0 if back_first_derivative is None else 1)
@@ -99,9 +99,9 @@ def build(contracts, weighting, mult_adjust_func, add_adjust_func,
     constraintMatrix = csr_matrix(
         (numConstraints, numCoefficientsToSolve), dtype=float).todense()
     vector = csr_matrix(
-        (numPolynomials * 5 + numConstraints, 1), dtype=float).todense()
+        (numPolynomials * 4 + numConstraints, 1), dtype=float).todense()
 
-    twoHMatrix = csr_matrix((numPolynomials * 5, numPolynomials * 5), dtype=float).todense()
+    twoHMatrix = csr_matrix((numPolynomials * 4, numPolynomials * 4), dtype=float).todense()
 
     inputContractIndex = 0
     gapFilled = False
@@ -109,52 +109,52 @@ def build(contracts, weighting, mult_adjust_func, add_adjust_func,
     delta = contracts[0].Offset
     rowNum = 0
     for i in range(numPolynomials):
-        colOffset = i * 5
+        colOffset = i * 4
         if i < numPolynomials - 1:
                 
             timeToPolynomialBoundary = timeToPolynomialBoundaries[i]
             timeToPolynomialBoundaryPow2 = pow(timeToPolynomialBoundary, 2)
             timeToPolynomialBoundaryPow3 = pow(timeToPolynomialBoundary, 3)
-            timeToPolynomialBoundaryPow4 = pow(timeToPolynomialBoundary, 4)
+            #timeToPolynomialBoundaryPow4 = pow(timeToPolynomialBoundary, 4)
 
             #Polynomial equality at boundaries
             constraintMatrix[rowNum, colOffset] = 1.0
             constraintMatrix[rowNum, colOffset + 1] = timeToPolynomialBoundary
             constraintMatrix[rowNum, colOffset + 2] = timeToPolynomialBoundaryPow2
             constraintMatrix[rowNum, colOffset + 3] = timeToPolynomialBoundaryPow3
-            constraintMatrix[rowNum, colOffset + 4] = timeToPolynomialBoundaryPow4
+            #constraintMatrix[rowNum, colOffset + 4] = timeToPolynomialBoundaryPow4
 
-            constraintMatrix[rowNum, colOffset + 5] = -1.0
-            constraintMatrix[rowNum, colOffset + 6] = -timeToPolynomialBoundary
-            constraintMatrix[rowNum, colOffset + 7] = -timeToPolynomialBoundaryPow2
-            constraintMatrix[rowNum, colOffset + 8] = -timeToPolynomialBoundaryPow3
-            constraintMatrix[rowNum, colOffset + 9] = -timeToPolynomialBoundaryPow4
+            constraintMatrix[rowNum, colOffset + 4] = -1.0
+            constraintMatrix[rowNum, colOffset + 5] = -timeToPolynomialBoundary
+            constraintMatrix[rowNum, colOffset + 6] = -timeToPolynomialBoundaryPow2
+            constraintMatrix[rowNum, colOffset + 7] = -timeToPolynomialBoundaryPow3
+            #constraintMatrix[rowNum, colOffset + 9] = -timeToPolynomialBoundaryPow4
 
             #Polynomial first derivative equality at boundaries
             constraintMatrix[rowNum + 1, colOffset] = 0.0
             constraintMatrix[rowNum + 1, colOffset + 1] = 1.0
             constraintMatrix[rowNum + 1, colOffset + 2] = 2.0 * timeToPolynomialBoundary
             constraintMatrix[rowNum + 1, colOffset + 3] = 3.0 * timeToPolynomialBoundaryPow2
-            constraintMatrix[rowNum + 1, colOffset + 4] = 4.0 * timeToPolynomialBoundaryPow3
+            #constraintMatrix[rowNum + 1, colOffset + 4] = 4.0 * timeToPolynomialBoundaryPow3
 
-            constraintMatrix[rowNum + 1, colOffset + 5] = 0.0
-            constraintMatrix[rowNum + 1, colOffset + 6] = -1.0
-            constraintMatrix[rowNum + 1, colOffset + 7] = -2.0 * timeToPolynomialBoundary
-            constraintMatrix[rowNum + 1, colOffset + 8] = -3.0 * timeToPolynomialBoundaryPow2
-            constraintMatrix[rowNum + 1, colOffset + 9] = -4.0 * timeToPolynomialBoundaryPow3
+            constraintMatrix[rowNum + 1, colOffset + 4] = 0.0
+            constraintMatrix[rowNum + 1, colOffset + 5] = -1.0
+            constraintMatrix[rowNum + 1, colOffset + 6] = -2.0 * timeToPolynomialBoundary
+            constraintMatrix[rowNum + 1, colOffset + 7] = -3.0 * timeToPolynomialBoundaryPow2
+            #constraintMatrix[rowNum + 1, colOffset + 9] = -4.0 * timeToPolynomialBoundaryPow3
 
             #Polynomial second derivative equality at boundaries
             constraintMatrix[rowNum + 2, colOffset] = 0.0
             constraintMatrix[rowNum + 2, colOffset + 1] = 0.0
             constraintMatrix[rowNum + 2, colOffset + 2] = 2.0
             constraintMatrix[rowNum + 2, colOffset + 3] = 6.0 * timeToPolynomialBoundary
-            constraintMatrix[rowNum + 2, colOffset + 4] = 12.0 * timeToPolynomialBoundaryPow2
+            #constraintMatrix[rowNum + 2, colOffset + 4] = 12.0 * timeToPolynomialBoundaryPow2
 
+            constraintMatrix[rowNum + 2, colOffset + 4] = 0.0
             constraintMatrix[rowNum + 2, colOffset + 5] = 0.0
-            constraintMatrix[rowNum + 2, colOffset + 6] = 0.0
-            constraintMatrix[rowNum + 2, colOffset + 7] = -2.0
-            constraintMatrix[rowNum + 2, colOffset + 8] = -6 * timeToPolynomialBoundary
-            constraintMatrix[rowNum + 2, colOffset + 9] = -12.0 * timeToPolynomialBoundaryPow2
+            constraintMatrix[rowNum + 2, colOffset + 6] = -2.0
+            constraintMatrix[rowNum + 2, colOffset + 7] = -6 * timeToPolynomialBoundary
+            #constraintMatrix[rowNum + 2, colOffset + 9] = -12.0 * timeToPolynomialBoundaryPow2
 
         #Contract price constraint
         if i==0 or ((contracts[inputContractIndex - 1].End - contracts[inputContractIndex].Start) / offset(delta, 1) == -1) or gapFilled:
@@ -164,7 +164,7 @@ def build(contracts, weighting, mult_adjust_func, add_adjust_func,
             sumWeightMultTime = 0.0
             sumWeightMultTimePow2 = 0.0
             sumWeightMultTimePow3 = 0.0
-            sumWeightMultTimePow4 = 0.0
+            #sumWeightMultTimePow4 = 0.0
             sumWeightMultAdd = 0.0
 
             iterated = list(enumerate_periods(
@@ -180,7 +180,7 @@ def build(contracts, weighting, mult_adjust_func, add_adjust_func,
                 sumWeightMultTime += weight * multAdjust * timeToPeriod
                 sumWeightMultTimePow2 += weight * multAdjust * pow(timeToPeriod, 2.0)
                 sumWeightMultTimePow3 += weight * multAdjust * pow(timeToPeriod, 3.0)
-                sumWeightMultTimePow4 += weight * multAdjust * pow(timeToPeriod, 4.0)
+                #sumWeightMultTimePow4 += weight * multAdjust * pow(timeToPeriod, 4.0)
                 sumWeightMultAdd += weight * multAdjust * addAdjust
 
             priceConstraintRow = rowNum if i==(numPolynomials - 1) else rowNum + 3
@@ -194,24 +194,24 @@ def build(contracts, weighting, mult_adjust_func, add_adjust_func,
             #Coefficient of d
             constraintMatrix[priceConstraintRow, colOffset + 3] = sumWeightMultTimePow3
             #Coefficient of e
-            constraintMatrix[priceConstraintRow, colOffset + 4] = sumWeightMultTimePow4
+            #constraintMatrix[priceConstraintRow, colOffset + 4] = sumWeightMultTimePow4
             
-            vector[numPolynomials * 5 + priceConstraintRow] = sumWeight * contract.Price - sumWeightMultAdd
+            vector[numPolynomials * 4 + priceConstraintRow] = sumWeight * contract.Price - sumWeightMultAdd
             
             subMatrix = create_2h_bottom_right_submatrix(
                 contract, curveStartPeriod, time_func)
-            startIndex = i*5+2
+            startIndex = i*4+2
             endIndexRow = startIndex + subMatrix.shape[0]
             endIndexCol = startIndex + subMatrix.shape[1]
             twoHMatrix[startIndex:endIndexRow,
                        startIndex:endIndexCol] = subMatrix
             
             inputContractIndex += 1
-            rowNum += 4
+            rowNum += 4 #or 3??
             gapFilled = False
         else:
             #Gap in contracts
-            rowNum += 3
+            rowNum += 3  # or 2??
             gapFilled = True
 
     #TODO unit test first derivative constraints. How?
@@ -219,7 +219,7 @@ def build(contracts, weighting, mult_adjust_func, add_adjust_func,
     if front_first_derivative is not None:
         #Coefficient of b
         constraintMatrix[rowNum, 1] = 1
-        vector[numPolynomials * 5 + rowNum] = front_first_derivative
+        vector[numPolynomials * 4 + rowNum] = front_first_derivative
         rowNum += 1
     
     if back_first_derivative is not None:
@@ -227,14 +227,14 @@ def build(contracts, weighting, mult_adjust_func, add_adjust_func,
         timeToEnd = time_func(
             curveStartPeriod, lastPeriod + offset(delta, 1), delta)
         #Coefficient of b
-        constraintMatrix[rowNum, numCoefficientsToSolve - 4] = 1
+        constraintMatrix[rowNum, numCoefficientsToSolve - 3] = 1
         #Coefficient of c
-        constraintMatrix[rowNum, numCoefficientsToSolve - 3] = 2 * timeToEnd
+        constraintMatrix[rowNum, numCoefficientsToSolve - 2] = 2 * timeToEnd
         #Coefficient of d
-        constraintMatrix[rowNum, numCoefficientsToSolve - 2] = 3 * Math.Pow(timeToEnd, 2)
+        constraintMatrix[rowNum, numCoefficientsToSolve - 1] = 3 * Math.Pow(timeToEnd, 2)
         #Coefficient of e
-        constraintMatrix[rowNum, numCoefficientsToSolve - 1] = 4 * Math.Pow(timeToEnd, 3)
-        vector[numPolynomials * 5 + rowNum] = back_first_derivative
+        #constraintMatrix[rowNum, numCoefficientsToSolve - 1] = 4 * Math.Pow(timeToEnd, 3)
+        vector[numPolynomials * 4 + rowNum] = back_first_derivative
 
     solution = solve_linear_system(twoHMatrix, constraintMatrix, vector)
     
@@ -254,12 +254,13 @@ def build(contracts, weighting, mult_adjust_func, add_adjust_func,
         def evaluate_spline(time_period):
             
             timeToPeriod = time_func(curveStartPeriod, timePeriod, delta)
-            solutionOffset = i * 5
+            solutionOffset = i * 4
             splineValue = float(solution[solutionOffset] + 
                                 solution[solutionOffset + 1] * timeToPeriod + 
                                 solution[solutionOffset + 2] * pow(timeToPeriod, 2) + 
-                                solution[solutionOffset + 3] * pow(timeToPeriod, 3) + 
-                                solution[solutionOffset + 4] * pow(timeToPeriod, 4))
+                                solution[solutionOffset + 3] * pow(timeToPeriod, 3)# + 
+                                #solution[solutionOffset + 4] * pow(timeToPeriod, 4)
+                                )
 
             multAdjust = mult_adjust_func(timePeriod)
             addAdjust = add_adjust_func(timePeriod)
