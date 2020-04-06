@@ -522,6 +522,60 @@ namespace Cmdty.Curves.Test
         }
 
         [Test]
+        public void Bootstrap_SingleShapingRatio_AsExpected_Alt()
+        {
+            const double inputPriceRatio = 1.0;
+            var (curve, _) = new Bootstrapper<Month>()
+                .AddContract(Month.CreateApril(2020), 8.9584)
+                .AddContract(Month.CreateMay(2020), 9.0375)
+                .AddContract(Month.CreateJune(2020), 9.125)
+                .AddContract(Month.CreateJuly(2020), 9.1375)
+                .AddContract(Quarter.CreateQuarter2(2020), 9.0375)
+                .AddContract(Quarter.CreateQuarter3(2020), 9.395)
+                .AddContract(Quarter.CreateQuarter4(2020), 12.4975)
+                .AddContract(Quarter.CreateQuarter1(2021), 13.6725)
+                .AddContract(Season.CreateSummer(2020), 9.23)
+                .AddContract(Season.CreateWinter(2020), 13.06)
+                .AddContract(Season.CreateSummer(2021), 12.575)
+                .AddContract(Season.CreateWinter(2021), 15.075)
+                .AddShaping(Shaping<Month>.Ratio.Between(Month.CreateApril(2020))
+                    .And(Month.CreateJune(2020)).Is(inputPriceRatio))
+                .AllowRedundancy()
+                .Bootstrap();
+
+            var janPrice = curve[Month.CreateJanuary(2018)];
+            var febPrice = curve[Month.CreateFebruary(2018)];
+
+            var outputPriceRatio = janPrice / febPrice;
+            Assert.AreEqual(inputPriceRatio, outputPriceRatio, Tolerance);
+        }
+
+        [Test]
+        public void Bootstrap_SingleShapingRatio_AsExpected_Alt1()
+        {
+            const double inputPriceRatio = 1.0;
+            var (curve, _) = new Bootstrapper<Month>()
+                .AddContract(Month.CreateApril(2020), 8.9584)
+                .AddContract(Month.CreateMay(2020), 9.0375)
+                .AddContract(Quarter.CreateQuarter2(2020), 9.0375)
+                .AddContract(Quarter.CreateQuarter3(2020), 9.395)
+                .AddContract(Season.CreateSummer(2020), 9.23)
+                .AddContract(Season.CreateWinter(2020), 13.06)
+                .AddContract(new CalendarYear(2021), 13.385)
+                .AddContract(new CalendarYear(2022), 14.9625)
+                //.AddShaping(Shaping<Month>.Ratio.Between(Month.CreateApril(2020))
+                //    .And(Month.CreateJune(2020)).Is(inputPriceRatio))
+                .AllowRedundancy()
+                .Bootstrap();
+
+            var janPrice = curve[Month.CreateJanuary(2018)];
+            var febPrice = curve[Month.CreateFebruary(2018)];
+
+            var outputPriceRatio = janPrice / febPrice;
+            Assert.AreEqual(inputPriceRatio, outputPriceRatio, Tolerance);
+        }
+
+        [Test]
         public void Bootstrap_SingleShapingSpread_AsExpected()
         {
             const double inputPriceSpread = -0.88;
